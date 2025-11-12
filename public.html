@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Report Garbage — Public</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body {font-family:Poppins,Arial,sans-serif;margin:0;background:#eef6ed;}
+    header {background:#2b8a3e;color:#fff;padding:14px;text-align:center;font-weight:600;}
+    #map {height:65vh;border-bottom:1px solid rgba(0,0,0,0.06)}
+    .controls {padding:14px;max-width:900px;margin:12px auto;}
+    input[type=file], textarea {width:100%; padding:10px; margin-top:8px; border-radius:8px; border:1px solid #ccc}
+    textarea {min-height:80px; resize:vertical}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .btn{background:#2b8a3e;color:#fff;border:0;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600}
+    .note{font-size:13px;color:#556;margin-top:8px}
+    .back{background:#fff;color:#2b8a3e;border:1px solid rgba(43,138,62,0.12)}
+    @media(max-width:640px){ .row{flex-direction:column} }
+  </style>
+</head>
+<body>
+  <header>🗺️ Public — Report Garbage</header>
+
+  <div id="map"></div>
+
+  <div class="controls">
+    <div class="note">Click anywhere on the map to drop a pin where garbage is located.</div>
+    <label>Photo (required)</label>
+    <input id="photo" type="file" accept="image/*">
+    <label>Comment (optional)</label>
+    <textarea id="comment" placeholder="Describe the area..."></textarea>
+    <div class="row">
+      <button class="btn" onclick="submitReport()">Submit Report</button>
+      <button class="btn back" onclick="location.href='index.html'">Back to Home</button>
+    </div>
+    <div class="note" id="statusNote"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // --- CONFIG ---
+    const CLOUD_NAME = "drscsdi5m";
+    const UPLOAD_PRESET = "public_upload";
+    const BIN_ID = "69149419ae596e708f54b77e";
+    const API_KEY = "$2a$10$M82XOQ0SzJJkyIbSqmB.N.P3E4SU23ePZ5D2QBby.ZbLAlwgBK3c6";
+    // --------------
+
+    let map = L.map('map').setView([20.5937,78.9629],5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let tempMarker = null;
+    let selectedLatLng = null;
+    const statusNote = document.getElementById('statusNote');
+
+    map.on('click', (e) => {
+      selectedLatLng = e.latlng;
+      if (tempMarker) map.removeLayer(tempMarker);
+      tempMarker = L.marker(e.latlng).addTo(map).bindPopup('Selected').openPopup();
+    });
+
+    async function submitReport(){
+      try{
+        if(!selectedLatLng) return alert('Click the map to select a location.');
+        const file = document.getElementById('photo').files[0];
+        if(!file) return alert('Please select a photo.');
+        const comment = document.getElementById('comment').value || '';
+
+        statusNote.textContent = 'Uploading image...';
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('upload_preset', UPLOAD_PRESET);
+
+        const uploadResp = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+          method: 'POST', body: fd
+        });
+        const uploadData = await uploadResp.json();
+        const photoUrl = uploadData.secure_url;
+
+        statusNote.textContent = 'Saving report...';
+
+        const getResp = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+          headers: {"X-Master-Key": API_KEY}
+        });
+        const binJson = await getResp.json();
+        const existing = (binJson.record && binJson.record.reports) ? binJson.record.reports : [];
+
+        const newReport = {
+          id: Date.now().toString(),
+          lat: selectedLatLng.lat,
+          lng: selectedLatLng.lng,
+          comment,
+          photoUrl,
+          status: "Pending",
+          timestamp: new Date().toISOString()
+        };
+        existing.push(newReport);
+
+        await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+          method: 'PUT',
+          headers: {"Content-Type":"application/json","X-Master-Key":API_KEY},
+          body: JSON.stringify({reports: existing})
+        });
+
+        alert('✅ Report submitted!');
+        statusNote.textContent = '';
+        document.getElementById('photo').value='';
+        document.getElementById('comment').value='';
+        if(tempMarker){ map.removeLayer(tempMarker); tempMarker=null; selectedLatLng=null; }
+      } catch(err){
+        console.error(err);
+        alert('Error: ' + err.message);
+        statusNote.textContent='';
+      }
+    }
+  </script>
+</body>
+</html>
